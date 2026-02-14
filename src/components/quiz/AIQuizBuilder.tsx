@@ -96,26 +96,26 @@ export default function AIQuizBuilder() {
 
         {/* Topic */}
         <div className="space-y-2">
-          <Label htmlFor="topic" className="text-sm font-semibold">
+          <Label htmlFor="topic" className="text-sm font-semibold ml-1">
             Quiz Topic
           </Label>
 
           <Input
             id="topic"
-            placeholder="e.g., Photosynthesis, World War II, Python basics"
+            placeholder="e.g., Photosynthesis, Python basics"
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
-            className="h-11"
+            className="h-11 text-sm"
           />
 
-          <p className="text-xs text-muted-foreground pl-1">
+          <p className="text-xs text-muted-foreground ml-1">
             Tip: Add level keywords like “Class 12” or “NCERT”.
           </p>
         </div>
 
         {/* Questions Count */}
         <div className="space-y-2">
-          <Label htmlFor="numQ" className="text-sm font-semibold">
+          <Label htmlFor="numQ" className="text-sm font-semibold ml-1">
             Number of Questions
           </Label>
 
@@ -126,13 +126,13 @@ export default function AIQuizBuilder() {
             max={20}
             value={numQuestions}
             onChange={(e) => setNumQuestions(Number(e.target.value))}
-            className="h-11"
+            className="h-11 text-sm"
           />
         </div>
 
         {/* Difficulty Selector */}
         <div className="space-y-3">
-          <Label className="text-sm font-semibold">
+          <Label className="text-sm font-semibold ml-1">
             Difficulty Level
           </Label>
 
@@ -154,10 +154,6 @@ export default function AIQuizBuilder() {
               </button>
             ))}
           </div>
-
-          <p className="text-xs text-muted-foreground">
-            Easy = school level • Hard = competitive exams
-          </p>
         </div>
 
         {/* Rewrite Toggle */}
