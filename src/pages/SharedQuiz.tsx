@@ -412,7 +412,7 @@ const [showScoreDetails, setShowScoreDetails] = useState(false);
               if (!blocked) {
                 localStorage.setItem("quiz_started", "true");
                 localStorage.setItem("quiz_start_time", Date.now().toString());
-                setStarted(true);
+                window.location.reload();
               }
             }}
           >

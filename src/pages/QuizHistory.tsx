@@ -37,61 +37,83 @@ interface Attempt {
   tab_switch_count?: number;
 }
 
+interface LeaderboardEntry {
+  participant_name: string;
+  correct_count: number;
+  total_questions: number;
+}
+
 export default function QuizHistory() {
   const { quizId } = useParams();
   const navigate = useNavigate();
 
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [loadingId, setLoadingId] = useState<string | null>(null);
-
-  // UI Controls
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"latest" | "highest">("latest");
-
-  // Expand Groups
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
 
-  /* -----------------------------------
-     LOAD ATTEMPTS
-  ----------------------------------- */
-  useEffect(() => {
-    const loadAttempts = async () => {
-      const { data } = await supabase
-        .from("quiz_attempts")
-        .select("*")
-        .eq("quiz_id", quizId)
-        .order("completed_at", { ascending: false });
+  /* ---------------- LOAD ---------------- */
+useEffect(() => {
+  const loadData = async () => {
+    const { data: attemptsData } = await supabase
+      .from("quiz_attempts")
+      .select("*")
+      .eq("quiz_id", quizId)
+      .order("completed_at", { ascending: false });
 
-      if (data) setAttempts(data);
-    };
+    const { data: leaderboardData } = await supabase
+      .from("quiz_leaderboard")
+      .select("participant_name, correct_count, total_questions")
+      .eq("quiz_id", quizId);
 
-    loadAttempts();
-  }, [quizId]);
+    if (attemptsData) setAttempts(attemptsData);
+    if (leaderboardData) setLeaderboard(leaderboardData);
+  };
 
-  /* -----------------------------------
-     GROUP ATTEMPTS BY USER
-  ----------------------------------- */
+  loadData();
+}, [quizId]);
+
+  /* ---------------- HELPERS ---------------- */
+
+  const getSemiCircleValues = (percent: number) => {
+  const radius = 26;
+  const circumference = Math.PI * radius; // half circle
+  const offset = circumference - (percent / 100) * circumference;
+  return { radius, circumference, offset };
+};
+
+  const getScorePercent = (score: number, total: number) =>
+    Math.round((score / total) * 100);
+
+  const getScoreColor = (percent: number) => {
+    if (percent >= 80) return "bg-green-500";
+    if (percent >= 50) return "bg-yellow-500";
+    return "bg-red-500";
+  };
+
+  const formatDuration = (seconds?: number | null) => {
+    if (!seconds) return "N/A";
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
+  };
+
+  /* ---------------- GROUP ---------------- */
   const groupedAttempts = useMemo(() => {
     let filtered = attempts.filter((a) =>
       a.participant_name.toLowerCase().includes(search.toLowerCase())
     );
 
-    // Sorting
     filtered = [...filtered].sort((a, b) => {
-  if (filter === "highest") {
-    return b.score - a.score;
-  }
+      if (filter === "highest") return b.score - a.score;
+      return (
+        new Date(b.completed_at).getTime() -
+        new Date(a.completed_at).getTime()
+      );
+    });
 
-  return (
-    new Date(b.completed_at).getTime() -
-    new Date(a.completed_at).getTime()
-  );
-});
-
-
-
-
-    // Grouping
     const groups: Record<string, Attempt[]> = {};
     filtered.forEach((a) => {
       if (!groups[a.participant_name]) groups[a.participant_name] = [];
@@ -101,21 +123,22 @@ export default function QuizHistory() {
     return groups;
   }, [attempts, search, filter]);
 
-  /* -----------------------------------
-     DELETE SINGLE ATTEMPT
-  ----------------------------------- */
+  const leaderboardMap = useMemo(() => {
+  const map: Record<string, LeaderboardEntry> = {};
+  leaderboard.forEach((entry) => {
+    map[entry.participant_name] = entry;
+  });
+  return map;
+}, [leaderboard]);
+
+  /* ---------------- DELETE ---------------- */
   const deleteAttempt = async (id: string) => {
     setLoadingId(id);
-
     await supabase.from("quiz_attempts").delete().eq("id", id);
-
     setAttempts((prev) => prev.filter((a) => a.id !== id));
     setLoadingId(null);
   };
 
-  /* -----------------------------------
-     DELETE ALL ATTEMPTS FOR ONE USER
-  ----------------------------------- */
   const deleteUserAttempts = async (name: string) => {
     await supabase
       .from("quiz_attempts")
@@ -126,45 +149,27 @@ export default function QuizHistory() {
     setAttempts((prev) => prev.filter((a) => a.participant_name !== name));
   };
 
-
-  const formatCSVTime = (seconds?: number | null) => {
-  if (seconds === null || seconds === undefined) return "N/A";
-
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-
-  return `${mins}m ${secs}s`;
-};
-
-  /* -----------------------------------
-     EXPORT CSV
-  ----------------------------------- */
+  /* ---------------- EXPORT ---------------- */
   const exportCSV = () => {
-    if (attempts.length === 0) return;
+    if (!attempts.length) return;
 
     const rows = [
-  ["Name", "Score", "Total Questions", "Time Taken", "Tab Switches", "Completed At"],
-
-  ...attempts.map((a) => [
-    a.participant_name,
-    a.score,
-    a.total_questions,
-    formatCSVTime(a.time_taken_seconds),
-    a.tab_switch_count ?? 0,
-    `"${new Date(a.completed_at).toLocaleString()}"`,
-  ]),
-];
-
-const escapeCSV = (value: any) => {
-  if (value === null || value === undefined) return "";
-  return `"${String(value).replace(/"/g, '""')}"`;
-};
-
+      ["Name", "Score", "Total Questions", "Time Taken", "Tab Switches", "Completed At"],
+      ...attempts.map((a) => [
+        a.participant_name,
+        a.score,
+        a.total_questions,
+        formatDuration(a.time_taken_seconds),
+        a.tab_switch_count ?? 0,
+        new Date(a.completed_at).toLocaleString(),
+      ]),
+    ];
 
     const csvContent =
-  "data:text/csv;charset=utf-8," +
-  rows.map((r) => r.map(escapeCSV).join(",")).join("\n");
-
+      "data:text/csv;charset=utf-8," +
+      rows.map((r) =>
+        r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")
+      ).join("\n");
 
     const link = document.createElement("a");
     link.href = encodeURI(csvContent);
@@ -172,29 +177,13 @@ const escapeCSV = (value: any) => {
     link.click();
   };
 
-  const formatDuration = (seconds?: number | null) => {
-  if (seconds === null || seconds === undefined) return "N/A";
-
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-
-  return `${mins}m ${secs}s`;
-};
-
-
   return (
     <div className="min-h-screen bg-background">
-      {/* ✅ HEADER */}
-      <header className="sticky top-0 z-20 border-b bg-card/70 backdrop-blur-md">
+      {/* HEADER */}
+      <header className="sticky top-0 z-20 border-b bg-card/80 backdrop-blur-md">
         <div className="container flex items-center justify-between py-4">
-          {/* LEFT */}
           <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => navigate(-1)}
-              className="rounded-full"
-            >
+            <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
               <ArrowLeft className="h-5 w-5" />
             </Button>
 
@@ -203,25 +192,18 @@ const escapeCSV = (value: any) => {
             </div>
 
             <div>
-              <h1 className="font-display text-lg font-bold">
-                Attempt History
-              </h1>
+              <h1 className="text-lg font-bold">Attempt History</h1>
               <p className="text-xs text-muted-foreground">
-              {attempts.length} total attempts • Best Score:{" "}
-              {attempts.length > 0
-                ? Math.max(...attempts.map((a) => a.score))
-                : 0}
-            </p>
-
+                {attempts.length} attempts
+              </p>
             </div>
           </div>
 
-          {/* RIGHT */}
           <Button
             variant="outline"
             size="sm"
             onClick={exportCSV}
-            disabled={attempts.length === 0}
+            disabled={!attempts.length}
           >
             <Download className="h-4 w-4 mr-2" />
             Export CSV
@@ -229,116 +211,225 @@ const escapeCSV = (value: any) => {
         </div>
       </header>
 
-      {/* ✅ MAIN */}
-      <main className="container max-w-2xl py-10 space-y-6">
-        {/* SEARCH + FILTER */}
+      {/* MAIN */}
+      <main className="container max-w-6xl py-10 space-y-6">
+        {/* SEARCH */}
         <div className="flex flex-col sm:flex-row gap-3">
-          {/* Search */}
           <div className="relative flex-1">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search by student name..."
+              placeholder="Search student..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
             />
           </div>
 
-          {/* Filter */}
-          <select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value as any)}
-            className="rounded-md border px-3 py-2 text-sm bg-transparent"
-          >
-            <option value="latest">Latest Attempts</option>
-            <option value="highest">Highest Scores</option>
-          </select>
+          <div className="flex gap-2">
+            <Button
+              variant={filter === "latest" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setFilter("latest")}
+            >
+              Latest
+            </Button>
+
+            <Button
+              variant={filter === "highest" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setFilter("highest")}
+            >
+              Highest
+            </Button>
+          </div>
         </div>
 
-        {/* EMPTY */}
-        {Object.keys(groupedAttempts).length === 0 ? (
-          <p className="text-muted-foreground text-center py-20">
-            No attempts found.
-          </p>
-        ) : (
-          Object.entries(groupedAttempts).map(([name, userAttempts]) => (
-            <div
-              key={name}
-              className="glass-card rounded-2xl overflow-hidden"
+        {/* USERS */}
+        {Object.entries(groupedAttempts).map(([name, userAttempts]) => (
+          <div key={name} className="rounded-2xl border bg-card overflow-hidden">
+            
+            {/* PROFILE HEADER */}
+            <button
+              onClick={() =>
+                setExpandedUser(expandedUser === name ? null : name)
+              }
+              className="w-full flex items-center justify-between px-6 py-5 hover:bg-muted/30 transition"
             >
-              {/* USER HEADER */}
-              <button
-                onClick={() =>
-                  setExpandedUser(expandedUser === name ? null : name)
-                }
-                className="w-full flex items-center justify-between p-5 hover:bg-muted/20 transition"
-              >
-                <div className="text-left">
-                  <p className="font-semibold">{name}</p>
+              <div className="flex items-center gap-6 relative">
+                {/* LETTER PROFILE CARD */}
+                {leaderboardMap[name] && (() => {
+                  const latest = leaderboardMap[name];
+                  const percent = Math.round(
+                    (latest.correct_count / latest.total_questions) * 100
+                  );
+
+                  const radius = 28;
+                  const centerX = 40;
+                  const centerY = 40;
+
+                  const startX = centerX;
+                  const startY = centerY - radius; // 12 o'clock
+
+                  const endAngle = Math.PI * percent / 100; // 0 → π (half circle)
+                  const endX = centerX + radius * Math.sin(endAngle);
+                  const endY = centerY - radius * Math.cos(endAngle);
+
+                  return (
+                    <div className="relative h-16 w-16 flex items-center justify-center">
+                      <svg
+                        width="80"
+                        height="80"
+                        viewBox="0 0 80 80"
+                        className="absolute"
+                      >
+                        {/* Background 12 → 6 arc */}
+                        <path
+                          d={`
+                            M ${centerX} ${centerY - radius}
+                            A ${radius} ${radius} 0 0 1 ${centerX} ${centerY + radius}
+                          `}
+                          fill="none"
+                          stroke="hsl(var(--muted))"
+                          strokeWidth="6"
+                        />
+
+                        {/* Progress Arc 12 → dynamic position */}
+                        <path
+                          d={`
+                            M ${startX} ${startY}
+                            A ${radius} ${radius} 0 ${
+                              percent > 50 ? 1 : 0
+                            } 1 ${endX} ${endY}
+                          `}
+                          fill="none"
+                          stroke={
+                            percent >= 80
+                              ? "#22c55e"
+                              : percent >= 50
+                              ? "#eab308"
+                              : "#ef4444"
+                          }
+                          strokeWidth="6"
+                          strokeLinecap="round"
+                          style={{ transition: "all 0.6s ease" }}
+                        />
+                      </svg>
+
+                      {/* Avatar */}
+                      <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-lg font-bold text-primary relative z-10">
+                        {name.charAt(0).toUpperCase()}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="text-left space-y-1">
+                  <p className="font-semibold text-base">{name}</p>
+
+                  {/* Latest Attempt Shrink Card */}
+                  {leaderboardMap[name] && (() => {
+                    const latest = leaderboardMap[name];
+                    const percent = Math.round(
+                      (latest.correct_count / latest.total_questions) * 100
+                    );
+
+                    return (
+                      <div className="mt-1 space-y-1">
+                        <div className="inline-flex items-center gap-2 rounded-lg bg-muted/40 px-3 py-1 text-xs font-medium">
+                          <span className="">
+                            Correct: {latest.correct_count}
+                          </span>
+                          <span className="text-muted-foreground">
+                            Latest Attempt
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   <p className="text-xs text-muted-foreground">
-                    {userAttempts.length} attempt
-                    {userAttempts.length !== 1 ? "s" : ""}
+                    {userAttempts.length} attempts
                   </p>
                 </div>
+              </div>
 
-                <ChevronDown
-                  className={`h-5 w-5 transition ${
-                    expandedUser === name ? "rotate-180" : ""
-                  }`}
-                />
-              </button>
+              <ChevronDown
+                className={`h-5 w-5 transition-transform duration-300 ${
+                  expandedUser === name ? "rotate-180" : ""
+                }`}
+              />
+            </button>
 
-              {/* EXPANDED ATTEMPTS */}
-              {expandedUser === name && (
-                <div className="border-t px-5 py-4 space-y-3">
-                  {userAttempts.map((a) => (
+            {/* EXPANDED */}
+            <div
+              className={`transition-all duration-300 overflow-hidden ${
+                expandedUser === name
+                  ? "max-h-[2000px] opacity-100"
+                  : "max-h-0 opacity-0"
+              }`}
+            >
+              <div className="border-t px-6 py-6 space-y-5">
+                {userAttempts.map((a) => {
+                  const percent = getScorePercent(
+                    a.score,
+                    a.total_questions
+                  );
+
+                  return (
                     <div
                       key={a.id}
-                      className="flex items-center justify-between rounded-xl border p-3"
+                      className="relative flex flex-col gap-4 rounded-xl border bg-muted/20 p-5 pr-14 hover:bg-muted/30 transition"
                     >
-                      <div className="space-y-1">
-              <p className="text-sm font-medium">
-                Score: {a.score}/{a.total_questions}
-              </p>
+                      {/* LEFT */}
+                      <div className="flex-1 space-y-3">
+                        {/* SCORE HEADER */}
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                          <div>
+                            <p className="text-lg font-semibold">
+                              {a.score}/{a.total_questions}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {percent}% Score
+                            </p>
+                          </div>
 
-              {/* ✅ Time Taken */}
-              <p className="text-xs text-muted-foreground">
-                Time Taken:{" "}
-                <span className="font-medium text-foreground">
-                  {formatDuration(a.time_taken_seconds)}
-                </span>
-              </p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(a.completed_at).toLocaleString()}
+                          </p>
+                        </div>
 
+                        {/* PROGRESS BAR */}
+                        <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${getScoreColor(percent)} transition-all`}
+                            style={{ width: `${percent}%` }}
+                          />
+                        </div>
 
-              {/* ✅ Tab Switch Count */}
-              <p className="text-xs text-muted-foreground">
-                Tab Switches:{" "}
-                <span
-                  className={`font-medium ${
-                    (a.tab_switch_count || 0) > 0
-                      ? "text-destructive"
-                      : "text-green-600"
-                  }`}
-                >
-                  {a.tab_switch_count ?? 0}
-                </span>
-              </p>
+                        {/* META INFO */}
+                        <div className="flex flex-wrap gap-6 text-xs text-muted-foreground">
+                          <span>⏱ {formatDuration(a.time_taken_seconds)}</span>
+                          <span
+                            className={
+                              (a.tab_switch_count || 0) > 0
+                                ? "text-red-600 font-medium"
+                                : "text-green-600 font-medium"
+                            }
+                          >
+                            Tab Switches: {a.tab_switch_count ?? 0}
+                          </span> 
+                        </div>
+                      </div>
 
-              {/* Completed At */}
-              <p className="text-xs text-muted-foreground">
-                {new Date(a.completed_at).toLocaleString()}
-              </p>
-            </div>
-
-
-                      {/* Delete Single */}
+                      {/* DELETE */}
+                      <div className="absolute top-5 right-5">
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button
                             size="icon"
                             variant="ghost"
                             disabled={loadingId === a.id}
-                            className="text-destructive hover:bg-destructive/10"
+                            className="text-muted-foreground hover:text-red-600"
                           >
                             {loadingId === a.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
@@ -348,20 +439,20 @@ const escapeCSV = (value: any) => {
                           </Button>
                         </AlertDialogTrigger>
 
-                        <AlertDialogContent className="rounded-2xl">
+                        <AlertDialogContent>
                           <AlertDialogHeader>
                             <AlertDialogTitle>
                               Delete this attempt?
                             </AlertDialogTitle>
                             <AlertDialogDescription>
-                              This attempt will be permanently removed.
+                              This cannot be undone.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
 
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancel</AlertDialogCancel>
                             <AlertDialogAction
-                              className="bg-destructive"
+                              className="bg-red-600"
                               onClick={() => deleteAttempt(a.id)}
                             >
                               Delete
@@ -370,46 +461,43 @@ const escapeCSV = (value: any) => {
                         </AlertDialogContent>
                       </AlertDialog>
                     </div>
-                  ))}
+                    </div>
+                  );
+                })}
 
-                  {/* Delete All For User */}
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        className="w-full mt-2"
+                {/* DELETE ALL */}
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" size="sm" className="w-full">
+                      Delete All Attempts for {name}
+                    </Button>
+                  </AlertDialogTrigger>
+
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        Delete all attempts for {name}?
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently remove every attempt.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        className="bg-red-600"
+                        onClick={() => deleteUserAttempts(name)}
                       >
-                        Delete All Attempts for {name}
-                      </Button>
-                    </AlertDialogTrigger>
-
-                    <AlertDialogContent className="rounded-2xl">
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>
-                          Delete all attempts for {name}?
-                        </AlertDialogTitle>
-                        <AlertDialogDescription>
-                          This will remove every attempt made by this user.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction
-                          className="bg-destructive"
-                          onClick={() => deleteUserAttempts(name)}
-                        >
-                          Yes, Delete All
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
-              )}
+                        Confirm
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
             </div>
-          ))
-        )}
+          </div>
+        ))}
       </main>
     </div>
   );
