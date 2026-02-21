@@ -25,6 +25,7 @@ export default function AIQuizBuilder() {
   const [generatedTitle, setGeneratedTitle] = useState("");
   const [generatedQuestions, setGeneratedQuestions] = useState<GeneratedQuestion[] | null>(null);
   const { toast } = useToast();
+  const [questionType, setQuestionType] = useState("MCQ");
   const [difficulty, setDifficulty] = useState("Medium");
   const [rewriteEnabled, setRewriteEnabled] = useState(true);
 
@@ -42,8 +43,7 @@ export default function AIQuizBuilder() {
         topic,
         numQuestions,
         mode: "ai",
-
-        // ✅ New Professional Controls
+        questionType,
         difficulty,
         rewriteEnabled,
       },
@@ -81,10 +81,6 @@ export default function AIQuizBuilder() {
 
         {/* Header */}
         <div className="text-center space-y-2">
-          <div className="h-16 w-16 rounded-2xl gradient-primary flex items-center justify-center mx-auto shadow-md">
-            <Sparkles className="h-8 w-8 text-primary-foreground" />
-          </div>
-
           <h2 className="font-display text-3xl font-bold">
             AI Quiz Generator
           </h2>
@@ -129,6 +125,35 @@ export default function AIQuizBuilder() {
             className="h-11 text-sm"
           />
         </div>
+        {/* Question Type Selector */}
+<div className="space-y-3">
+  <Label className="text-sm font-semibold ml-1">
+    Question Format
+  </Label>
+
+          <div className="grid grid-cols-3 gap-2">
+            {["MCQ", "Assertion-Reason", "Mixed"].map((type) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setQuestionType(type)}
+                className={`rounded-xl border px-3 py-2 text-sm font-medium transition-all
+                  ${
+                    questionType === type
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-muted hover:bg-muted/70 text-muted-foreground"
+                  }
+                `}
+              >
+                {type}
+              </button>
+            ))}
+          </div>
+
+          <p className="text-xs text-muted-foreground ml-1">
+            Choose the structure of generated questions.
+          </p>
+        </div>
 
         {/* Difficulty Selector */}
         <div className="space-y-3">
@@ -137,7 +162,7 @@ export default function AIQuizBuilder() {
           </Label>
 
           <div className="grid grid-cols-3 gap-2">
-            {["Easy", "Medium", "Hard"].map((level) => (
+            {["Easy", "Medium", "Competitive"].map((level) => (
               <button
                 key={level}
                 type="button"

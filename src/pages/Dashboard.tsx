@@ -20,6 +20,8 @@ import {
   Settings,
   X,
   Save,
+  History,
+  Trophy,
 } from "lucide-react";
 
 import { format } from "date-fns";
@@ -53,6 +55,9 @@ interface Quiz {
   tab_switch_warnings?: number;
   prevent_copy_paste?: boolean;
   randomise_questions?: boolean;
+  leaderboard_enabled?: boolean;
+  negative_marking_enabled?: boolean;
+  negative_mark_value?: number;
 }
 
 export default function Dashboard() {
@@ -80,6 +85,12 @@ export default function Dashboard() {
   const [preventCopyPaste, setPreventCopyPaste] = useState(false);
   const [randomiseQuestions, setRandomiseQuestions] = useState(false);
 
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
+const [leaderboardSwitch, setLeaderboardSwitch] = useState(true);
+const [negativeMarkingEnabled, setNegativeMarkingEnabled] = useState(false);
+const [negativeMarkValue, setNegativeMarkValue] = useState(0);
+
 
   /* -----------------------------------
      FETCH QUIZZES
@@ -88,7 +99,7 @@ export default function Dashboard() {
     const { data, error } = await supabase
       .from("quizzes")
       .select(
-        "id, title, share_token, created_at, duration_minutes, max_retries, sharing_enabled, show_answers, prevent_tab_switch, tab_switch_warnings, prevent_copy_paste, randomise_questions"
+        "id, title, share_token, created_at, duration_minutes, max_retries, sharing_enabled, show_answers, prevent_tab_switch, tab_switch_warnings, prevent_copy_paste, randomise_questions, leaderboard_enabled,negative_marking_enabled, negative_mark_value"
       )
       .eq("user_id", user!.id)
       .order("created_at", { ascending: false });
@@ -176,6 +187,8 @@ export default function Dashboard() {
     const retries = quiz.max_retries || 0;
     setRetriesEnabled(retries > 0);
     setMaxRetries(retries);
+    setNegativeMarkingEnabled(quiz.negative_marking_enabled ?? false);
+    setNegativeMarkValue(quiz.negative_mark_value ?? 0);
 
     setSettingsOpen(true);
   };
@@ -199,6 +212,8 @@ export default function Dashboard() {
         tab_switch_warnings: tabWarnings,
         prevent_copy_paste: preventCopyPaste,
         randomise_questions: randomiseQuestions,
+        negative_marking_enabled: negativeMarkingEnabled,
+        negative_mark_value: negativeMarkingEnabled ? negativeMarkValue : 0,
       })
       .eq("id", selectedQuiz.id);
 
@@ -216,6 +231,34 @@ export default function Dashboard() {
     setSettingsOpen(false);
     fetchQuizzes();
   };
+
+  const formatTime = (seconds: number) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+};
+
+const clearLeaderboard = async () => {
+  if (!selectedQuiz) return;
+
+  const { error } = await supabase
+    .from("quiz_leaderboard")
+    .delete()
+    .eq("quiz_id", selectedQuiz.id);
+
+  if (error) {
+    toast({
+      title: "Error clearing leaderboard",
+      description: error.message,
+      variant: "destructive",
+    });
+    return;
+  }
+
+  toast({ title: "Leaderboard cleared successfully" });
+
+  setLeaderboardData([]);
+};
 
   return (
     <div className="min-h-screen bg-background">
@@ -348,7 +391,29 @@ export default function Dashboard() {
                     variant="outline"
                     onClick={() => navigate(`/quiz/history/${quiz.id}`)}
                   >
+                    <History className="mr-1 h-3.5 w-3.5" />
                     History
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      setSelectedQuiz(quiz);
+                      setLeaderboardSwitch(quiz.leaderboard_enabled ?? true);
+
+                      const { data } = await supabase
+                        .from("quiz_leaderboard")
+                        .select("id, participant_name, score, time_taken_seconds, updated_at")
+                        .eq("quiz_id", quiz.id)
+                        .order("score", { ascending: false })
+                        .order("time_taken_seconds", { ascending: true });
+
+                      setLeaderboardData(data || []);
+                      setLeaderboardOpen(true);
+                    }}
+                  >
+                    <Trophy className="mr-1 h-3.5 w-3.5" />
+                    Leaderboard
                   </Button>
 
                   {/* ✅ SETTINGS BUTTON */}
@@ -445,7 +510,7 @@ export default function Dashboard() {
             SECTION 1: TIMER
         -------------------------------- */}
         <div className="space-y-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground ml-1">
             Time Limit
           </h3>
 
@@ -617,8 +682,47 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+        {/* -------------------------------
+    SECTION 5: SCORING
+-------------------------------- */}
+<div className="space-y-3">
+  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    Scoring
+  </h3>
+
+  <div className="rounded-xl border p-4 space-y-4">
+
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-sm font-medium">
+          Enable Negative Marking
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Deduct marks for wrong answers
+        </p>
       </div>
 
+      <Switch
+        checked={negativeMarkingEnabled}
+        onCheckedChange={setNegativeMarkingEnabled}
+      />
+    </div>
+
+    {negativeMarkingEnabled && (
+      <Input
+        type="number"
+        min="0"
+        step="0.01"
+        value={negativeMarkValue}
+        onChange={(e) => setNegativeMarkValue(Number(e.target.value))}
+        placeholder="Marks deducted per wrong answer (e.g. 0.25)"
+      />
+    )}
+
+  </div>
+</div>
+      </div>
+              
       {/* ✅ FOOTER */}
       <div className="px-6 py-4 border-t bg-muted/30">
         <Button
@@ -628,11 +732,210 @@ export default function Dashboard() {
           <Save className="mr-2 h-4 w-4" />
           Save Settings
         </Button>
-      </div>
+      </div>  
     </div>
   </div>
 )}
 
+{leaderboardOpen && selectedQuiz && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="w-full max-w-lg rounded-2xl bg-card shadow-2xl overflow-hidden animate-scale-in">
+
+      {/* HEADER */}
+      <div className="flex items-center justify-between px-6 py-4 border-b">
+        <div>
+          <h2 className="font-display text-xl font-bold">
+            Leaderboard
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Manage leaderboard visibility
+          </p>
+        </div>
+
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={() => setLeaderboardOpen(false)}
+        >
+          <X className="h-5 w-5" />
+        </Button>
+      </div>
+
+      {/* BODY */}
+      <div className="px-6 py-5 space-y-6 max-h-[60vh] overflow-y-auto">
+
+        {/* Toggle */}
+        <div className="flex items-center justify-between border rounded-xl p-4">
+          <div>
+            <p className="text-sm font-medium">Enable Leaderboard</p>
+            <p className="text-xs text-muted-foreground">
+              Participants can view rankings after submission
+            </p>
+          </div>
+
+          <Switch
+            checked={leaderboardSwitch}
+            onCheckedChange={setLeaderboardSwitch}
+          />
+        </div>
+
+        {/* Leaderboard List */}
+        <div className="space-y-3">
+
+          {/* Summary Row */}
+          <div className="flex justify-between text-sm text-muted-foreground border-b pb-3">
+            <span>Total Participants: {leaderboardData.length}</span>
+            <span>
+              Best Score: {leaderboardData[0]?.score ?? 0}
+            </span>
+          </div>
+
+          {leaderboardData.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center">
+              No attempts yet.
+            </p>
+          ) : (
+            leaderboardData.map((entry, index) => {
+              const totalQuestions = selectedQuiz?.question_count || 0;
+              const percentage =
+                totalQuestions > 0
+                  ? Math.round((entry.score / totalQuestions) * 100)
+                  : 0;
+
+              const mins = Math.floor(entry.time_taken_seconds / 60);
+              const secs = entry.time_taken_seconds % 60;
+              const formattedTime = `${mins}:${secs
+                .toString()
+                .padStart(2, "0")}`;
+
+              const isTopThree = index < 3;
+
+              return (
+                <div
+                  key={entry.id}
+                  className={`flex items-center justify-between rounded-xl px-4 py-3 border transition
+                    ${
+                      isTopThree
+                        ? "bg-primary/5 border-primary/20"
+                        : "bg-background"
+                    }
+                  `}
+                >
+                  {/* LEFT SIDE */}
+                  <div className="flex items-center gap-4">
+
+                    {/* Rank Badge */}
+                    <div
+                      className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold
+                        ${
+                          index === 0
+                            ? "bg-yellow-500 text-white"
+                            : index === 1
+                            ? "bg-gray-400 text-white"
+                            : index === 2
+                            ? "bg-orange-500 text-white"
+                            : "bg-muted text-muted-foreground"
+                        }
+                      `}
+                    >
+                      {index + 1}
+                    </div>
+
+                    <div>
+                      <p className="font-medium">
+                        {entry.participant_name}
+                      </p>
+
+                      <p className="text-xs text-muted-foreground">
+                        {totalQuestions > 0 && (
+                          <>
+                            {entry.score}/{totalQuestions} • {percentage}%
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* RIGHT SIDE */}
+                  <div className="text-right">
+                    <p className="text-sm font-semibold">
+                      ⏱ {formattedTime}
+                    </p>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* FOOTER */}
+      <div className="px-6 py-4 border-t bg-muted/30 flex gap-3">
+
+  {/* Clear Leaderboard Button */}
+  <AlertDialog>
+    <AlertDialogTrigger asChild>
+      <Button
+        variant="outline"
+        className="border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
+      >
+        <Trash2 className="mr-2 h-4 w-4" />
+        Clear
+      </Button>
+    </AlertDialogTrigger>
+
+    <AlertDialogContent className="w-[95%] max-w-md rounded-xl p-6">
+      <AlertDialogHeader>
+        <AlertDialogTitle>
+          Clear Leaderboard?
+        </AlertDialogTitle>
+
+        <AlertDialogDescription>
+          This will permanently remove all leaderboard entries
+          for this quiz.
+          <br />
+          This action cannot be undone.
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+
+      <AlertDialogFooter>
+        <AlertDialogCancel>
+          Cancel
+        </AlertDialogCancel>
+
+        <AlertDialogAction
+          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          onClick={clearLeaderboard}
+        >
+          Yes, Clear Leaderboard
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
+
+  {/* Save Button */}
+  <Button
+    className="flex-1 gradient-primary text-primary-foreground"
+    onClick={async () => {
+      await supabase
+        .from("quizzes")
+        .update({ leaderboard_enabled: leaderboardSwitch })
+        .eq("id", selectedQuiz.id);
+
+      toast({ title: "Leaderboard settings updated" });
+
+      setLeaderboardOpen(false);
+      fetchQuizzes();
+    }}
+  >
+    <Save className="mr-2 h-4 w-4" />
+    Save Settings
+  </Button>
+
+</div>
+    </div>
+  </div>
+)}
 
     </div>
   );

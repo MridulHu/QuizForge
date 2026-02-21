@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Brain, CheckCircle2, Timer, ChevronUp } from "lucide-react";
+import { Brain, Info, Timer, ChevronUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
@@ -79,6 +79,20 @@ export default function SharedQuiz() {
   const [navOpen, setNavOpen] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState(0);
 
+  const [timeTaken, setTimeTaken] = useState<number>(0);
+  const [tabSwitchCount, setTabSwitchCount] = useState<number>(0);
+  const [leaderboardEnabled, setLeaderboardEnabled] = useState(true);
+  const [leaderboard, setLeaderboard] = useState<any[]>([]);
+  const [openLeaderboard, setOpenLeaderboard] = useState(false);
+
+  const [negativeMarkingEnabled, setNegativeMarkingEnabled] = useState(false);
+const [negativeMarkValue, setNegativeMarkValue] = useState(0);
+
+const [correctCount, setCorrectCount] = useState(0);
+const [wrongCount, setWrongCount] = useState(0);
+const [showScoreDetails, setShowScoreDetails] = useState(false);
+
+
   /* --------------------------------------------
      LOAD QUIZ + SETTINGS
   -------------------------------------------- */
@@ -89,7 +103,7 @@ export default function SharedQuiz() {
       const { data: quiz } = await supabase
         .from("quizzes")
         .select(
-          "id, title, duration_minutes, max_retries, sharing_enabled, show_answers, prevent_tab_switch, tab_switch_warnings, prevent_copy_paste,randomise_questions",
+          "id, title, duration_minutes, max_retries, sharing_enabled, show_answers, prevent_tab_switch, tab_switch_warnings, prevent_copy_paste,randomise_questions, leaderboard_enabled, negative_marking_enabled, negative_mark_value",
         )
         .eq("share_token", shareToken)
         .maybeSingle();
@@ -112,6 +126,9 @@ export default function SharedQuiz() {
       setTabWarnings(quiz.tab_switch_warnings ?? 3);
       setPreventCopyPaste(quiz.prevent_copy_paste ?? false);
       setRandomiseQuestions(quiz.randomise_questions ?? false);
+      setLeaderboardEnabled(quiz.leaderboard_enabled ?? true);
+      setNegativeMarkingEnabled(quiz.negative_marking_enabled ?? false);
+      setNegativeMarkValue(Number(quiz.negative_mark_value ?? 0));
 
       setQuizTitle(quiz.title);
       setQuizId(quiz.id);
@@ -471,14 +488,30 @@ export default function SharedQuiz() {
         : JSON.parse(localStorage.getItem("quiz_questions") || "[]");
 
     let correct = 0;
+    let wrong = 0;
 
     latestQuestions.forEach((q) => {
-      if (latestAnswers[q.id] === q.correct_option_index) {
+      const selected = latestAnswers[q.id];
+
+      if (selected === q.correct_option_index) {
         correct++;
+      } else if (selected !== undefined) {
+        wrong++;
       }
     });
 
-    setScore(correct);
+    let finalScore = correct;
+
+    if (negativeMarkingEnabled) {
+      finalScore = correct - wrong * negativeMarkValue;
+
+      // Prevent negative total score
+      finalScore = Math.max(finalScore, 0);
+    }
+
+    setCorrectCount(correct);
+    setWrongCount(wrong);
+    setScore(finalScore);
     setSubmitted(true);
 
     let timeTakenSeconds = 0;
@@ -502,19 +535,46 @@ export default function SharedQuiz() {
 
     // Never allow 0 seconds
     timeTakenSeconds = Math.max(timeTakenSeconds, 1);
+    setTimeTaken(timeTakenSeconds);
+
+    const switches = Number(
+      localStorage.getItem("quiz_tab_switches") || "0"
+    );
+
+    setTabSwitchCount(switches);
 
     await supabase.from("quiz_attempts").insert({
       quiz_id: quizId,
       user_id: null,
       participant_name: participantName,
       answers: latestAnswers,
-      score: correct,
+      score: finalScore,
       total_questions: latestQuestions.length,
       time_taken_seconds: timeTakenSeconds,
-      tab_switch_count: Number(
-        localStorage.getItem("quiz_tab_switches") || "0",
-      ),
+      tab_switch_count: switches,
     });
+    if (leaderboardEnabled) {
+  const { data, error } = await supabase
+    .from("quiz_leaderboard")
+    .upsert(
+      {
+        quiz_id: quizId,
+        participant_name: participantName,
+        score: finalScore,
+        correct_count: correct,
+        total_questions: latestQuestions.length,
+        time_taken_seconds: timeTakenSeconds,
+        updated_at: new Date(),
+      },
+      {
+        onConflict: "quiz_id,participant_name",
+      }
+    );
+
+  if (error) {
+    console.error("Leaderboard Upsert Error:", error);
+  }
+}
 
     await checkAttempts();
     setWarningCount(0);
@@ -563,6 +623,18 @@ export default function SharedQuiz() {
     window.location.reload();
   };
 
+  const fetchLeaderboard = async () => {
+  const { data } = await supabase
+    .from("quiz_leaderboard")
+    .select("*")
+    .eq("quiz_id", quizId)
+    .order("score", { ascending: false })
+    .order("time_taken_seconds", { ascending: true })
+    .limit(20);
+
+  if (data) setLeaderboard(data);
+};
+
   const optionLabels = ["A", "B", "C", "D"];
 
   const scrollToQuestion = (index: number) => {
@@ -584,6 +656,19 @@ export default function SharedQuiz() {
   // Close navigator after click
   setNavOpen(false);
 };
+
+useEffect(() => {
+  if (!openLeaderboard || !quizId) return;
+
+  // Fetch immediately when modal opens
+  fetchLeaderboard();
+
+  const interval = setInterval(() => {
+    fetchLeaderboard();
+  }, 5000);
+
+  return () => clearInterval(interval);
+}, [openLeaderboard, quizId]);
 
 
   /* --------------------------------------------
@@ -646,32 +731,146 @@ export default function SharedQuiz() {
       <main className="container py-8 max-w-3xl mb-20 lg:max-w-5xl xl:max-w-6xl">
 
         {submitted && (
-          <div className="glass-card rounded-xl p-6 mb-6 text-center animate-scale-in">
-            <CheckCircle2 className="h-12 w-12 text-accent mx-auto mb-3" />
-            <h2 className="font-display text-2xl font-bold">
-              You scored {score}/{questions.length}
-            </h2>
+  <div className="glass-card rounded-2xl p-6 mb-6 animate-scale-in">
 
-            {maxRetries > 0 && !blocked && (
-              <>
-                {/* ✅ Retries Left Display */}
-                <p className="text-sm text-muted-foreground mt-2">
-                  Retries left:{" "}
-                  <span className="font-semibold">
-                    {retriesLeft}/{maxRetries}
-                  </span>
-                </p>
+    {/* ===== Top Row ===== */}
+    <div className="flex flex-row items-center justify-between gap-4 text-center w-full">
 
-                <Button
-                  className="mt-4 gradient-primary text-primary-foreground"
-                  onClick={handleRetry}
-                >
-                  Retry Quiz
-                </Button>
-              </>
-            )}
+      {/* Score */}
+      <div className="flex flex-col items-center md:items-start">
+
+  {/* Score Row */}
+  <div className="flex items-center gap-2">
+
+  <h2 className="font-display text-2xl font-bold">
+    {score}
+  </h2>
+
+  <AlertDialog>
+    <AlertDialogTrigger asChild>
+      <button className="text-muted-foreground hover:text-primary transition">
+        <Info className="h-4 w-4" />
+      </button>
+    </AlertDialogTrigger>
+
+    <AlertDialogContent className="rounded-2xl w-[92%] max-w-sm p-6">
+
+      <AlertDialogHeader>
+        <AlertDialogTitle>
+          Score Breakdown
+        </AlertDialogTitle>
+
+        <AlertDialogDescription>
+          Detailed evaluation of your attempt
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+
+      <div className="mt-4 space-y-3 text-sm">
+
+        <div className="flex justify-between">
+          <span>Correct Answers</span>
+          <span className="font-semibold text-green-600">
+            {correctCount}
+          </span>
+        </div>
+
+        <div className="flex justify-between">
+          <span>Wrong Answers</span>
+          <span className="font-semibold text-destructive">
+            {wrongCount}
+          </span>
+        </div>
+
+        {negativeMarkingEnabled && (
+          <div className="flex justify-between">
+            <span>Negative Mark</span>
+            <span className="font-semibold">
+              -{negativeMarkValue} per wrong
+            </span>
           </div>
         )}
+
+      </div>
+
+      <AlertDialogFooter>
+        <AlertDialogCancel>Close</AlertDialogCancel>
+      </AlertDialogFooter>
+
+    </AlertDialogContent>
+  </AlertDialog>
+
+</div>
+
+  <p className="text-sm text-muted-foreground">
+    Final Score
+  </p>
+
+</div>
+
+      {/* Time Taken */}
+      <div className="flex flex-col items-center">
+        <p className="text-2xl font-semibold">
+          {formatTime(timeTaken)}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Time Taken
+        </p>
+      </div>
+
+      {/* Tab Switches */}
+      <div className="flex flex-col items-center">
+        <p className="text-2xl font-semibold">
+          {tabSwitchCount}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Tab Switches
+        </p>
+      </div>
+
+    </div>
+
+    {/* ===== Retry Section ===== */}
+   {/* ===== Action Section ===== */}
+<div className="mt-6 pt-4 border-t flex flex-col items-center gap-3">
+
+  <div className="flex gap-3">
+
+    {maxRetries > 0 && !blocked && (
+      <Button
+        className="gradient-primary text-primary-foreground"
+        onClick={handleRetry}
+      >
+        Retry Quiz
+      </Button>
+    )}
+
+    {leaderboardEnabled && (
+      <Button
+        variant="outline"
+        onClick={async () => {
+          await fetchLeaderboard();
+          setOpenLeaderboard(true);
+        }}
+      >
+        Leaderboard
+      </Button>
+    )}
+
+  </div>
+
+  {maxRetries > 0 && !blocked && (
+    <p className="text-sm text-muted-foreground">
+      Retries left{" "}
+      <span className="font-semibold text-foreground">
+        {retriesLeft}/{maxRetries}
+      </span>
+    </p>
+  )}
+
+</div>
+
+  </div>
+)}
 
         <div className="space-y-4 ">
           {questions.map((q, qIndex) => (
@@ -915,6 +1114,119 @@ export default function SharedQuiz() {
             </div>
           </>
         )}
+        {/* ===============================
+         Leaderboard Modal
+      =============================== */}
+      <AlertDialog
+        open={openLeaderboard}
+        onOpenChange={setOpenLeaderboard}
+      >
+        <AlertDialogContent className="rounded-2xl w-[95%] max-w-lg">
+
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+            Leaderboard
+            <span className="text-xs text-green-600 font-medium animate-pulse">
+              ● Live
+            </span>
+          </AlertDialogTitle>
+            <AlertDialogDescription>
+              Ranked by Score (High → Low) and Time (Fast → Slow)
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-4 max-h-[420px] overflow-y-auto mt-4 pr-1">
+            
+
+  {leaderboard.length === 0 ? (
+    <p className="text-sm text-muted-foreground text-center py-8">
+      No attempts yet.
+    </p>
+  ) : (
+    
+    leaderboard.map((entry, index) => {
+  const isCurrentUser =
+    entry.participant_name === participantName;
+
+  const percentage =
+    entry.total_questions > 0
+      ? Math.round(
+          (entry.correct_count / entry.total_questions) * 100
+        )
+      : 0;
+
+  const medal =
+    index === 0
+      ? "🥇"
+      : index === 1
+      ? "🥈"
+      : index === 2
+      ? "🥉"
+      : null;
+
+  return (
+    <div
+      key={entry.id}
+      className={`relative rounded-2xl p-4 border transition-all duration-300
+        ${
+          isCurrentUser
+            ? "border-primary bg-primary/10 shadow-md"
+            : "border-border bg-card hover:shadow-sm"
+        }
+      `}
+    >
+      {/* Rank + Medal */}
+      <div className="flex items-center justify-between">
+
+        <div className="flex items-center gap-4">
+
+          <div className="flex items-center justify-center h-10 w-10 rounded-full bg-muted text-sm font-bold">
+            {medal ? medal : index + 1}
+          </div>
+
+          <div>
+            <p className={`font-semibold ${isCurrentUser ? "text-primary" : ""}`}>
+              {entry.participant_name}
+              {isCurrentUser && (
+                <span className="ml-2 text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded-full">
+                  You
+                </span>
+              )}
+            </p>
+
+            <p className="text-xs text-muted-foreground">
+              {percentage}% accuracy
+            </p>
+          </div>
+        </div>
+
+        <div className="text-right">
+          <p className="text-lg font-bold">
+            {entry.score}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            ⏱ {formatTime(entry.time_taken_seconds)}
+          </p>
+        </div>
+
+      </div>
+
+      {/* Subtle Glow for Top 3 */}
+      {index < 3 && (
+        <div className="absolute inset-0 rounded-2xl ring-1 ring-primary/10 pointer-events-none" />
+      )}
+    </div>
+  );
+})
+  )}
+</div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel>Close</AlertDialogCancel>
+          </AlertDialogFooter>
+
+        </AlertDialogContent>
+      </AlertDialog>
       </main>
     </div>
   );

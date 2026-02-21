@@ -6,7 +6,6 @@
   import ManualQuizBuilder from "@/components/quiz/ManualQuizBuilder";
   import AIQuizBuilder from "@/components/quiz/AIQuizBuilder";
   import OCRQuizBuilder from "@/components/quiz/OCRQuizBuilder";
-  
 
   type Method = "choose" | "manual" | "ai" | "ocr";
 
