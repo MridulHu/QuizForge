@@ -48,7 +48,7 @@
               </span>
             </div>
           </header>
-          <main className="container py-8 max-w-3xl">
+          <main className="w-full max-w-[1600px] mx-auto py-10 px-10">
             {method === "manual" && <ManualQuizBuilder />}
             {method === "ai" && <AIQuizBuilder />}
             {method === "ocr" && <OCRQuizBuilder />}
@@ -69,27 +69,49 @@
           </div>
         </header>
 
-        <main className="container py-12 max-w-3xl">
+        <main className="container py-16 max-w-6xl">
           <div className="text-center mb-10 animate-fade-in">
             <h1 className="font-display text-3xl font-bold mb-2">How would you like to create your quiz?</h1>
             <p className="text-muted-foreground">Choose a method to get started.</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {methods.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setMethod(m.id)}
-                className="glass-card rounded-xl p-6 text-left hover:shadow-xl transition-all hover:-translate-y-1 animate-fade-in group"
-              >
-                <div className="h-12 w-12 rounded-xl gradient-primary flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-                  <m.icon className="h-6 w-6 text-primary-foreground " />
-                </div>
-                <h3 className="font-display text-lg font-semibold mb-1 text-center">{m.title}</h3>
-                <p className="text-sm text-muted-foreground text-center">{m.description}</p>
-              </button>
-            ))}
-          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+  {methods.map((m) => (
+    <button
+      key={m.id}
+      onClick={() => setMethod(m.id)}
+      className="
+        glass-card 
+        rounded-2xl 
+        p-8 
+        text-left 
+        hover:shadow-2xl 
+        transition-all 
+        hover:-translate-y-2 
+        animate-fade-in 
+        group
+        flex 
+        flex-col 
+        items-center 
+        justify-between
+        min-h-[220px]
+      "
+    >
+      <div className="h-14 w-14 rounded-2xl gradient-primary flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+        <m.icon className="h-7 w-7 text-primary-foreground" />
+      </div>
+
+      <div className="text-center">
+        <h3 className="font-display text-xl font-semibold mb-2">
+          {m.title}
+        </h3>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          {m.description}
+        </p>
+      </div>
+    </button>
+  ))}
+</div>
         </main>
       </div>
     );

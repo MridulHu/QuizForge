@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, Save, GripVertical } from "lucide-react";
@@ -21,6 +20,51 @@ interface ManualQuizBuilderProps {
   isEditing?: boolean;
 }
 
+/* ---------------- AUTO EXPAND INPUT ---------------- */
+
+function AutoExpandInput({
+  value,
+  onChange,
+  placeholder,
+  className = "",
+  onClick,
+}: {
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  placeholder?: string;
+  className?: string;
+  onClick?: (e: any) => void;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.style.height = "auto";
+      ref.current.style.height = ref.current.scrollHeight + "px";
+    }
+  }, [value]);
+
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={onChange}
+      onClick={onClick}
+      placeholder={placeholder}
+      rows={1}
+      className={`
+        w-full resize-none overflow-hidden
+        bg-transparent
+        focus:outline-none
+        leading-relaxed
+        ${className}
+      `}
+    />
+  );
+}
+
+/* ---------------- MAIN COMPONENT ---------------- */
+
 export default function ManualQuizBuilder({
   initialTitle = "",
   initialQuestions,
@@ -37,6 +81,8 @@ export default function ManualQuizBuilder({
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  const optionLabels = ["A", "B", "C", "D"];
 
   const addQuestion = () => {
     setQuestions((prev) => [
@@ -87,7 +133,10 @@ export default function ManualQuizBuilder({
         return;
       }
       if (q.options.some((o) => !o.trim())) {
-        toast({ title: `All options in Q${i + 1} must be filled`, variant: "destructive" });
+        toast({
+          title: `All options in Q${i + 1} must be filled`,
+          variant: "destructive",
+        });
         return;
       }
     }
@@ -98,12 +147,9 @@ export default function ManualQuizBuilder({
       let targetQuizId = quizId;
 
       if (isEditing && quizId) {
-        // Update existing quiz
         await supabase.from("quizzes").update({ title }).eq("id", quizId);
-        // Delete old questions and re-insert
         await supabase.from("questions").delete().eq("quiz_id", quizId);
       } else {
-        // Create new quiz
         const { data, error } = await supabase
           .from("quizzes")
           .insert({ title, user_id: user!.id })
@@ -113,7 +159,6 @@ export default function ManualQuizBuilder({
         targetQuizId = data.id;
       }
 
-      // Insert questions
       const questionRows = questions.map((q, i) => ({
         quiz_id: targetQuizId!,
         question_text: q.question_text,
@@ -122,43 +167,73 @@ export default function ManualQuizBuilder({
         order_num: i,
       }));
 
-      const { error: qError } = await supabase.from("questions").insert(questionRows);
+      const { error: qError } = await supabase
+        .from("questions")
+        .insert(questionRows);
+
       if (qError) throw qError;
 
       toast({ title: isEditing ? "Quiz updated!" : "Quiz created!" });
       navigate("/dashboard");
     } catch (err: any) {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
+      toast({
+        title: "Error",
+        description: err.message,
+        variant: "destructive",
+      });
     }
 
     setSaving(false);
   };
 
-  const optionLabels = ["A", "B", "C", "D"];
+  function formatAssertionReason(text: string) {
+  if (!text.includes("Assertion:") || !text.includes("Reason:")) {
+    return text; // Normal MCQ — leave untouched
+  }
+
+  return text.replace(
+    /\s*Reason:\s*/i,
+    "\nReason: "
+  );
+}
+  
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-8 animate-fade-in max-w-5xl mx-auto ">
+
+      {/* ---------------- TITLE ---------------- */}
+
       <div className="space-y-2">
-        <Label htmlFor="title" className="text-base font-semibold ml-2.5">Quiz Title</Label>
-        <Input
-          id="title"
-          placeholder="e.g., Biology Chapter 5 Review"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          className="text-lg"
-        />
+        <Label className="text-base font-semibold ml-2.5">
+          Quiz Title
+        </Label>
+
+        <div className="rounded-xl border bg-card px-4 py-3 focus-within:ring-2 focus-within:ring-primary/40 transition">
+          <AutoExpandInput
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g., Biology Chapter 5 Review"
+            className="text-lg font-semibold"
+          />
+        </div>
       </div>
 
-      <div className="space-y-4">
+      {/* ---------------- QUESTIONS ---------------- */}
+
+      <div className="space-y-6">
         {questions.map((q, qIndex) => (
-          <div key={qIndex} className="glass-card rounded-xl p-5 space-y-4">
+          <div
+            key={qIndex}
+            className="glass-card rounded-xl p-6 space-y-5 hover:shadow-lg transition"
+          >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <GripVertical className="h-4 w-4 text-muted-foreground" />
-                <span className="font-display font-semibold text-sm text-muted-foreground">
+                <span className="font-semibold text-sm text-muted-foreground">
                   Question {qIndex + 1}
                 </span>
               </div>
+
               {questions.length > 1 && (
                 <Button
                   variant="ghost"
@@ -171,18 +246,23 @@ export default function ManualQuizBuilder({
               )}
             </div>
 
-            <Input
-              placeholder="Enter your question..."
-              value={q.question_text}
-              onChange={(e) => updateQuestion(qIndex, "question_text", e.target.value)}
-            />
+            <div className="rounded-lg border bg-card px-4 py-3 focus-within:ring-2 focus-within:ring-primary/40 transition">
+              <AutoExpandInput
+                value={formatAssertionReason(q.question_text)}
+                onChange={(e) =>
+                  updateQuestion(qIndex, "question_text", e.target.value)
+                }
+                placeholder="Enter your question..."
+                className="text-base"
+              />
+            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {q.options.map((opt, oIndex) => (
                 <div
                   key={oIndex}
                   onClick={() => setCorrectOption(qIndex, oIndex)}
-                  className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer transition-all ${
+                  className={`flex items-start gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-all ${
                     q.correct_option_index === oIndex
                       ? "border-accent bg-accent/10 ring-1 ring-accent"
                       : "border-border hover:border-primary/30"
@@ -195,28 +275,37 @@ export default function ManualQuizBuilder({
                         : "bg-muted text-muted-foreground"
                     }`}
                   >
-                    {optionLabels[oIndex]}
+                    {["A", "B", "C", "D"][oIndex]}
                   </span>
-                  <Input
-                    className="border-0 bg-transparent p-0 h-auto focus-visible:ring-0 pl-1"
-                    placeholder={`Option ${optionLabels[oIndex]}`}
+
+                  <AutoExpandInput
                     value={opt}
-                    onChange={(e) => updateOption(qIndex, oIndex, e.target.value)}
+                    onChange={(e) =>
+                      updateOption(qIndex, oIndex, e.target.value)
+                    }
                     onClick={(e) => e.stopPropagation()}
+                    placeholder={`Option ${["A", "B", "C", "D"][oIndex]}`}
+                    className="text-sm"
                   />
                 </div>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground">Click an option to mark it as correct</p>
+
+            <p className="text-xs text-muted-foreground">
+              Click an option to mark it as correct
+            </p>
           </div>
         ))}
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3">
+      {/* ---------------- ACTION BUTTONS ---------------- */}
+
+      <div className="flex flex-col sm:flex-row gap-4">
         <Button variant="outline" onClick={addQuestion} className="flex-1">
           <Plus className="mr-2 h-4 w-4" />
           Add Question
         </Button>
+
         <Button
           onClick={handleSave}
           disabled={saving}
